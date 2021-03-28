@@ -28,14 +28,24 @@ CHUNKSIZE = NROWS // NB_TRAITEMENTS
 # Test BD Mysql
 # =============================================================================
 
-requete_creer = "DROP TABLE IF EXISTS PATRONYME; " \
-      "CREATE TABLE PATRONYME (patronyme VARCHAR(50), nombre INT)"
+requete_creer = """DROP TABLE IF EXISTS PATRONYME; 
+                   CREATE TABLE PATRONYME (
+                   id_patronyme INT AUTO_INCREMENT PRIMARY KEY, 
+                   patronyme VARCHAR(30) NOT NULL, 
+                   nombre INT NOT NULL)"""
+
 
 donnee = pd.read_csv(PATRONYMES, sep=",")
 requete_inserer = ""
 
+
 for i in range(1000):
-    requete_inserer += f"""INSERT INTO PATRONYME(patronyme, nombre) VALUES("{donnee['patronyme'].values[i]}", {donnee['count'][i]}); """
+    patronyme, nombre = donnee.iloc[i]
+    requete_inserer += f"""INSERT INTO PATRONYME(patronyme, nombre) 
+                           VALUES(
+                           "{patronyme}",
+                            {nombre}
+                            ); """
 
 
 # =============================================================================
@@ -73,13 +83,12 @@ def recuperer_fichiers():
 
 
 # =============================================================================
-# Fonctions et DAG
+# Fonctions liées aux taâches
 # =============================================================================
 
-def preparer_data(**kwargs):
+def preparer_data():
     """
     Initialise les données de la table avec création de la colonne Taille.
-    :param kwargs: {fichier, chunksize, nrows}
     :return: None
     """
 
@@ -89,10 +98,10 @@ def preparer_data(**kwargs):
     except OSError:
         pass
 
-    print(f"preparer")
+    print("PREPARER_DATA")
 
 
-def traitement(**kwargs):
+def traitement_unitaire_b(**kwargs):
     """
     Calcule, insère les tailles et écrit les nouvelles données dans des fichiers distincts.
     :param kwargs: {lot}
@@ -103,6 +112,7 @@ def traitement(**kwargs):
     donnees = inserer_taille(lot)
     # Header = true si premier lot
     donnees.to_csv(f"{chemin_resultats}patronymes_tailles-{lot.index[0]}.csv", header=(lot.index[0] == 0), index=False)
+    print(f"TRAITEMENT_UNITAIRE_BATCH_LOT_{lot.index[0]}")
 
 
 def concatener_data_test():
@@ -116,6 +126,8 @@ def concatener_data_test():
         for fichier in fichiers:
             with open(fichier, 'r') as f:
                 f_final.write(f.read())
+
+    print("CONCATENER_DATA_TEST")
 
 
 def effacer_data():
@@ -133,18 +145,39 @@ def effacer_data():
         except OSError:
             pass
 
-    print("effacer_data")
+    print("EFFACER_DATA")
 
+
+# =============================================================================
+# DAG et TASKs
+# =============================================================================
 
 dag = DAG(
     dag_id='Batch_Longueur_Chaine',
     start_date=days_ago(2)
 )
 
+ceer_table = MySqlOperator(
+    task_id='TEST_creer_table',
+    sql=requete_creer,
+    mysql_conn_id='mysql_connexion',
+    database='airflow',
+    autocommit=True,
+    dag=dag
+)
+
+inserer_table = MySqlOperator(
+    task_id='TEST_inserer_table',
+    sql=requete_inserer,
+    mysql_conn_id='mysql_connexion',
+    database='airflow',
+    autocommit=True,
+    dag=dag
+)
+
 preparer_data = PythonOperator(
     task_id='preparer_data',
     python_callable=preparer_data,
-    op_kwargs={"fichier": PATRONYMES, "chunksize": CHUNKSIZE, "nrows": NROWS},
     dag=dag,
 )
 
@@ -154,36 +187,18 @@ concatener_data = BashOperator(
     dag=dag,
 )
 
-
 effacer_data = PythonOperator(
     task_id='effacer_data',
     python_callable=effacer_data,
     dag=dag,
 )
 
-ceer_table = MySqlOperator(
-    task_id='creer_table',
-    sql=requete_creer,
-    mysql_conn_id='mysql',
-    database='airflow',
-    autocommit=True,
-    dag=dag)
-
-inser_table = MySqlOperator(
-    task_id='inserer_table',
-    sql=requete_inserer,
-    mysql_conn_id='mysql',
-    database='airflow',
-    autocommit=True,
-    dag=dag)
-
 for lot in pd.read_csv(PATRONYMES, sep=",", chunksize=CHUNKSIZE, nrows=NROWS):
     traitement_unitaire_batch = PythonOperator(
         task_id=f"traitement_unitaire_batch_{lot.index[0]}",
-        python_callable=traitement,
+        python_callable=traitement_unitaire_b,
         op_kwargs={'lot': lot},
-        dag=dag,
+        dag=dag
     )
-    ceer_table >> inser_table >> preparer_data >> traitement_unitaire_batch >> concatener_data >> effacer_data
 
-
+    ceer_table >> inserer_table >> preparer_data >> traitement_unitaire_batch >> concatener_data >> effacer_data

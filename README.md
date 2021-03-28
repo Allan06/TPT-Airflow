@@ -3,6 +3,11 @@
 ## Initialisation
 ---
 
+### Prérequis
+
+	Docker
+	Environnement Python 3.x
+
 ### Création de l'environnement
 
 	docker-compose -f docker-compose.yaml up
@@ -13,7 +18,7 @@
         -> docker exec -it environnement_airflow-webserver_1 /bin/bash
     Par l'ID du container :
         -> docker ps (afficher les IDs des container actifs) 
-	    -> docker exec -it "container_ID" /bin/bash
+        -> docker exec -it "container_ID" /bin/bash
 
 ### Si Warning Microsof Azure, taper dans le terminal airflow
 
@@ -27,7 +32,7 @@ Parametrer la base de données MySQL :
 Dans le Webservr d'Airflow:
 
     Admin -> Connections -> Add a new record
-        - Conn Id   = mysql
+        - Conn Id   = mysql_connexion
         - Conn Type = MySQL
         - Host      = mysql
         - Schema    = airflow
@@ -50,4 +55,3 @@ Gestion de l'environnement :
 -   [PgAdmin](https://www.pgadmin.org/)
 
         -> PostgreSQL
-

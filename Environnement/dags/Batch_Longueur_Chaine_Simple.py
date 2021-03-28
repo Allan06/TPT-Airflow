@@ -67,7 +67,7 @@ def inserer_taille(lot):
 
 
 dag = DAG(
-    dag_id='Batch_Longueur_Chaine_2',
+    dag_id='Batch_Longueur_Chaine_Simple',
     start_date=days_ago(2)
 )
 
