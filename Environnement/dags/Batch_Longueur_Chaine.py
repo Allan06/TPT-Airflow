@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.utils.dates import days_ago
+from airflow.providers.mysql.operators.mysql import MySqlOperator
 
 import pandas as pd
 import numpy as np
@@ -11,32 +12,35 @@ import os
 
 
 # =============================================================================
-# Fonctions non DAG
+# Initilisation variable globales
 # =============================================================================
 
-class Table:
-    """
-    Classe définissant les fonctionnalité d'une table de données.
-    """
+chemin_resultats = "/opt/airflow/dags/resultats/"
+chemin_donnees = "/opt/airflow/dags/donnees/"
+PATRONYMES = f"{chemin_donnees}patronymes.csv"
 
-    def __init__(self):
-        self.donnees = None
-        self.nom_fichier = ""
-        self.nb_lignes = 0
+NB_TRAITEMENTS = 5
+NROWS = 800000
+CHUNKSIZE = NROWS // NB_TRAITEMENTS
 
-    def charger_donnees(self, nom_fichier, sep=',', nrows=None):
-        """
-        Charge les données d'un fihier dans un dataset
-        :param nom_fichier: chemin du fichier à charger
-        :param sep: type de séparateur
-        :param nrows: nombre de ligne à charger
-        :return: None
-        """
 
-        self.nom_fichier = nom_fichier
-        self.donnees = pd.read_csv(nom_fichier, sep=sep, nrows=nrows)
-        self.nb_lignes =  self.donnees.shape[0]
+# =============================================================================
+# Test BD Mysql
+# =============================================================================
 
+requete_creer = "DROP TABLE IF EXISTS PATRONYME; " \
+      "CREATE TABLE PATRONYME (patronyme VARCHAR(50), nombre INT)"
+
+donnee = pd.read_csv(PATRONYMES, sep=",")
+requete_inserer = ""
+
+for i in range(1000):
+    requete_inserer += f"""INSERT INTO PATRONYME(patronyme, nombre) VALUES("{donnee['patronyme'].values[i]}", {donnee['count'][i]}); """
+
+
+# =============================================================================
+# Fonctions non DAG
+# =============================================================================
 
 def inserer_taille(lot):
     """
@@ -65,20 +69,7 @@ def recuperer_fichiers():
     :return: la liste des chemins des fichiers
     """
 
-    return glob.glob('/opt/airflow/dags/Resultats/*-*.csv')
-
-
-# =============================================================================
-# Initilisation variable globales
-# =============================================================================
-
-PATRONYMES = "/opt/airflow/dags/patronymes.csv"
-
-NB_TRAITEMENTS = 5
-NROWS = 800000
-CHUNKSIZE = NROWS // NB_TRAITEMENTS
-
-table = Table()
+    return glob.glob(f"{chemin_resultats}*-*.csv")
 
 
 # =============================================================================
@@ -92,25 +83,13 @@ def preparer_data(**kwargs):
     :return: None
     """
 
-    global table
-
-    # Récupération des paramètres
-    fichier = kwargs["fichier"]
-    chunksize = kwargs["chunksize"]
-    nrows = kwargs["nrows"]
-
-    # Initialisation de la table
-    table.charger_donnees(fichier, sep=",", nrows=nrows)
-    colonne_tailles = np.zeros(table.nb_lignes, dtype=int)
-    table.donnees.assign(Taille=colonne_tailles)
-
     # Suppression d'anciens fichiers patronymes avec colonne Tailles
     try:
-        os.remove("/opt/airflow/dags/patronymes_tailles.csv")
+        os.remove(chemin_resultats + "*")
     except OSError:
         pass
 
-    print(f"preparer {table.nb_lignes} {table.nom_fichier}")
+    print(f"preparer")
 
 
 def traitement(**kwargs):
@@ -123,44 +102,20 @@ def traitement(**kwargs):
     lot = kwargs["lot"]
     donnees = inserer_taille(lot)
     # Header = true si premier lot
-    donnees.to_csv(f'/opt/airflow/dags/Resultats/patronymes_tailles-{lot.index[0]}.csv', header=False, index=False)
-
-    # TODO : Traitement à terminer
-    #  ================================================================
-    #  Ajouter une colonne de comptage des longueur des nom patrymoniale
-    #  Enregistrer le traitement dans un fichier
-    #  Concatener les 3 fichiers de sortie de traitements.
-    #  Tous les élement doivent être envoyé dans un fichier en mode append
-    #  Essayer avec un plus gros fichier et voir le test avec une base
+    donnees.to_csv(f"{chemin_resultats}patronymes_tailles-{lot.index[0]}.csv", header=(lot.index[0] == 0), index=False)
 
 
-def concatener_data():
+def concatener_data_test():
     """
     Concatène les nouveaux fichiers patronymes creés.
     :return: None
     """
 
     fichiers = recuperer_fichiers()
-    with open('/opt/airflow/dags/patronymes_tailles.csv', 'a') as f_final:
+    with open(f"{chemin_resultats}patronymes_tailles.csv", 'a') as f_final:
         for fichier in fichiers:
             with open(fichier, 'r') as f:
                 f_final.write(f.read())
-
-
-def maj_table():
-    """
-    Met à jour la table de données avec les nouvelles données.
-    :return: None
-    """
-
-    global table
-
-    donnees_copie = pd.read_csv('/opt/airflow/dags/patronymes_tailles.csv', sep=",")
-    for ligne in range(donnees_copie.shape[0]):
-        table.donnees.loc[ligne, "Taille"] = donnees_copie.loc[ligne, "Taille"]
-
-    print("Mise à jour table")
-    print(table.donnees.values)
 
 
 def effacer_data():
@@ -195,16 +150,10 @@ preparer_data = PythonOperator(
 
 concatener_data = BashOperator(
     task_id='concatener_data',
-    bash_command='cat /opt/airflow/dags/Resultats/*.csv >> /opt/airflow/dags/patronymes_tailles.csv',
+    bash_command=f"cat {chemin_resultats}*-*.csv >> {chemin_resultats}patronymes_tailles.csv",
     dag=dag,
 )
-"""
-maj_table = PythonOperator(
-    task_id='maj_table',
-    python_callable=maj_table,
-    dag=dag,
-)
-"""
+
 
 effacer_data = PythonOperator(
     task_id='effacer_data',
@@ -212,14 +161,29 @@ effacer_data = PythonOperator(
     dag=dag,
 )
 
+ceer_table = MySqlOperator(
+    task_id='creer_table',
+    sql=requete_creer,
+    mysql_conn_id='mysql',
+    database='airflow',
+    autocommit=True,
+    dag=dag)
+
+inser_table = MySqlOperator(
+    task_id='inserer_table',
+    sql=requete_inserer,
+    mysql_conn_id='mysql',
+    database='airflow',
+    autocommit=True,
+    dag=dag)
 
 for lot in pd.read_csv(PATRONYMES, sep=",", chunksize=CHUNKSIZE, nrows=NROWS):
     traitement_unitaire_batch = PythonOperator(
-        task_id='traitement_unitaire_batch_' + str(lot.index[0]),
+        task_id=f"traitement_unitaire_batch_{lot.index[0]}",
         python_callable=traitement,
         op_kwargs={'lot': lot},
         dag=dag,
     )
-    preparer_data >> traitement_unitaire_batch >> concatener_data >> effacer_data
+    ceer_table >> inser_table >> preparer_data >> traitement_unitaire_batch >> concatener_data >> effacer_data
 
 

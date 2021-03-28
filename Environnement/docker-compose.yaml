@@ -43,50 +43,48 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: mysql://airflow:airflow@mysql/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+mysql://airflow:airflow@mysql/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__CORE__SQL_ENGINE_COLLATION_FOR_IDS: 'utf8mb3_general_ci'
+
+
   volumes:
     - .//dags:/opt/airflow/dags
+    - .//dags/donnees:/opt/airflow/dags/donnees
+    - .//dags/resultats:/opt/airflow/dags/resultats
     - .//logs:/opt/airflow/logs
     - .//plugins:/opt/airflow/plugins
   user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
   depends_on:
-    redis:
-      condition: service_healthy
-    postgres:
-      condition: service_healthy
+    - mysql
+    - redis
 
 services:
-  postgres:
-    image: postgres:13
+  mysql:
+    image: mysql:latest
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-      POSTGRES_HOST_AUTH_METHOD: trust
+      MYSQL_ROOT_USERNAME: root
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: airflow
+      MYSQL_USER: airflow
+      MYSQL_PASSWORD: airflow
     ports:
-      - 5432:5432    
+      - 3307:3306
+    security_opt:
+      - seccomp:unconfined
     volumes:
-      - .//postgres-db-volume:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-      interval: 5s
-      retries: 5
+      - .//mysql:/var/lib/mysql
     restart: always
 
   redis:
     image: redis:latest
     ports:
       - 6379:6379
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 30s
-      retries: 50
     restart: always
 
   airflow-webserver:
@@ -134,4 +132,4 @@ services:
     restart: always
 
 volumes:
-  postgres-db-volume:
+  mysql:
