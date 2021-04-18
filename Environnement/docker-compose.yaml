@@ -52,7 +52,6 @@ x-airflow-common:
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
     AIRFLOW__CORE__SQL_ENGINE_COLLATION_FOR_IDS: 'utf8mb3_general_ci'
 
-
   volumes:
     - .//dags:/opt/airflow/dags
     - .//dags/donnees:/opt/airflow/dags/donnees
